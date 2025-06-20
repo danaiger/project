@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Set
-
 from xpand.models import Order
 from xpand.services import InventoryDb
 from xpand.services import Robot
@@ -16,11 +14,12 @@ class OrderFulfiller:
         self.inventory = inventory
 
     async def fulfill_order(self, order: Order):
-        slots = self._get_slots_by_order(order)
+        slots = self._get_items_to_possible_slots_dict(order)
 
-    def _get_slots_by_order(self, order: Order) -> Set[Slot]:
-        all_slots = []
+    def _get_items_to_possible_slots_dict(self, order: Order) -> dict[str, list[Slot]]:
+        items_to_possible_slots = dict()
         for item in order.items:
             slots = self.inventory.find_slots_by_sku(item.sku)
-            all_slots.extend(slots)
-        return set(all_slots)
+            items_to_possible_slots[item.sku] = slots
+
+        return items_to_possible_slots
