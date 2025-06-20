@@ -20,7 +20,7 @@ class OrderFulfiller:
         items_to_possible_slots = self._get_items_to_possible_slots_dict(order)
         items = items_to_possible_slots.keys()
         for item in items:
-            await self.robot.move_to(items_to_possible_slots[item])
+            self._get_individual_item(item, items_to_possible_slots)
 
     def _get_items_to_possible_slots_dict(self, order: Order) -> dict[str, list[Slot]]:
         items_to_possible_slots = dict()
@@ -40,8 +40,19 @@ class OrderFulfiller:
                     return True
                 else:
                     continue
+            else:
+                pass
 
     def is_dangerous(self, slot_to_reach: Slot, current_position: tuple[int, int]) -> bool:
+        if slot_to_reach.x < 1000 and current_position[0] < 1000:
+            return False
+        elif slot_to_reach.x > 2000 and current_position[0] > 2000:
+            return False
+        elif slot_to_reach.x >= 1000 and slot_to_reach.x <= 2000:
+            return True
+        elif current_position[0] >= 1000 and slot_to_reach[0] <= 2000:
+            return True
+
         return False
 
     async def _move_to_start_of_danger_while_folding(self, start_of_danger: tuple[int, int]):
