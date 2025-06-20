@@ -7,3 +7,4 @@ class RoboticArmMotion(Enum):
     PICK = 1
     PLACE_BAG = 2
     FOLD = 10
+    UNFOLD = 11
