@@ -11,6 +11,7 @@ from server.xpand.models.slot import Slot
 
 DANGER_ZONE_START = 1000
 DANGER_ZONE_END = 2000
+PLACING_SLOT = 'A0.3.0'
 
 
 class OrderFulfiller:
@@ -18,12 +19,22 @@ class OrderFulfiller:
     def __init__(self, robot: Robot, inventory: InventoryDb):
         self.robot = robot
         self.inventory = inventory
+        self._placing_slot_coordinates = self.inventory.get_slot(PLACING_SLOT)
+        self.placing_slot = Slot(
+            PLACING_SLOT, self._placing_slot_coordinates.x, self._placing_slot_coordinates.y,
+        )
 
     async def fulfill_order(self, order: Order):
         items_to_possible_slots = self._get_items_to_possible_slots_dict(order)
         items = items_to_possible_slots.keys()
+        items_picked = []
         for item in items:
-            self._get_individual_item(item, items_to_possible_slots)
+            if self._get_individual_item(item, items_to_possible_slots):
+                items_picked.append(item)
+            else:
+                continue
+        await self._move_safely(self.placing_slot)
+        await self.robot.execute_motion(RoboticArmMotion.PLACE_BAG)
 
     def _get_items_to_possible_slots_dict(self, order: Order) -> dict[str, list[Slot]]:
         items_to_possible_slots = dict()
