@@ -137,20 +137,3 @@ class OrderFulfiller:
         # Scenario 5: Safe movement (no danger zone interaction)
         else:
             await self.robot.move_to(target_x, target_y)
-
-    async def _move_to_start_of_danger_while_folding(
-        self, start_of_danger: tuple[int, int],
-    ):
-        await asyncio.gather(
-            self.robot.execute_motion(RoboticArmMotion.FOLD),
-            self.robot.move_to(start_of_danger),
-        )
-
-    async def _move_to_destination_while_unfolding(self, destination: Slot):
-        await asyncio.gather(
-            self.robot.move_to(destination.x, destination.y),
-            self.robot.execute_motion(RoboticArmMotion.UNFOLD),
-        )
-
-    async def _get_item_from_safe_slot(self, slot: Slot, item: str) -> bool:
-        await self.robot.move_to(slot.x, slot.y)
