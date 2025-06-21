@@ -9,8 +9,8 @@ from xpand.services import Robot
 from server.xpand.models.robotic_arm_motion import RoboticArmMotion
 from server.xpand.models.slot import Slot
 
-START = 1000
-END = 2000
+DANGER_ZONE_START = 1000
+DANGER_ZONE_END = 2000
 
 
 class OrderFulfiller:
@@ -33,12 +33,15 @@ class OrderFulfiller:
 
         return items_to_possible_slots
 
-    async def _get_individual_item(self, item: str, items_to_possible_slots: dict[str, list[Slot]]) -> bool:
+    async def _get_individual_item(
+        self, item: str, items_to_possible_slots: dict[str, list[Slot]],
+    ) -> bool:
         possible_slots = items_to_possible_slots[item]
         for slot in possible_slots:
             current_position = await self.robot.get_position()
             start, end = self.get_dangerous_zone_start_end_x(
-                slot, current_position,
+                slot,
+                current_position,
             )
 
             if not start and not end:
@@ -48,16 +51,24 @@ class OrderFulfiller:
                 else:
                     continue
             elif start:
-                await self._move_to_start_of_danger_while_folding(start, current_position[1])
+                await self._move_to_start_of_danger_while_folding(
+                    start, current_position[1],
+                )
                 if end:
                     await self.robot.move_to(end, current_position[1])
                     await self._move_to_destination_while_unfolding(slot)
 
-    def get_dangerous_zone_start_end_x(self, slot_to_reach: Slot, current_position: tuple[int, int]):
-        if (slot_to_reach.x >= START and slot_to_reach.x <= END) or (current_position[0] >= START and slot_to_reach[0] <= END):
-            if (slot_to_reach.x >= START and slot_to_reach.x <= END) and (current_position[0] >= START and slot_to_reach[0] <= END):
+    def get_dangerous_zone_start_end_x(
+        self, slot_to_reach: Slot, current_position: tuple[int, int],
+    ):
+        if (slot_to_reach.x >= START and slot_to_reach.x <= END) or (
+            current_position[0] >= START and slot_to_reach[0] <= END
+        ):
+            if (slot_to_reach.x >= START and slot_to_reach.x <= END) and (
+                current_position[0] >= START and slot_to_reach[0] <= END
+            ):
                 return (current_position[0], None)
-            elif (slot_to_reach.x >= START and slot_to_reach.x <= END):
+            elif slot_to_reach.x >= START and slot_to_reach.x <= END:
                 if current_position[0] < START:
                     return (START, None)
                 elif current_position[0] > END:
@@ -68,11 +79,109 @@ class OrderFulfiller:
             return (START, END)
         return None, None
 
-    async def _move_to_start_of_danger_while_folding(self, start_of_danger: tuple[int, int]):
-        await asyncio.gather(self.robot.execute_motion(RoboticArmMotion.FOLD), self.robot.move_to(start_of_danger))
+    async def _move_safely(self, target_slot: Slot):
+        current_x, current_y = await self.robot.get_position()
+        target_x, target_y = target_slot.x, target_slot.y
+
+        # Scenario 1: Passing completely through danger zone
+        if (current_x < DANGER_ZONE_START and target_x > DANGER_ZONE_END) or (
+            current_x > DANGER_ZONE_END and target_x < DANGER_ZONE_START
+        ):
+
+            # Start folding while beginning to move toward first boundary
+            fold_task = asyncio.create_task(
+                self.robot.execute_motion(RoboticArmMotion.FOLD),
+            )
+            await asyncio.gather(
+                fold_task,
+                self.robot.move_to(
+                    (
+                        DANGER_ZONE_START
+                        if current_x < DANGER_ZONE_START
+                        else DANGER_ZONE_END
+                    ),
+                    current_y,
+                ),
+            )
+
+            # Move through danger zone (already folded)
+            await self.robot.move_to(
+                DANGER_ZONE_END if current_x < DANGER_ZONE_START else DANGER_ZONE_START,
+                current_y,
+            )
+
+            # Move to final position and unfold
+            await asyncio.gather(
+                self.robot.move_to(target_x, target_y),
+                self.robot.execute_motion(RoboticArmMotion.UNFOLD),
+            )
+
+        # Scenario 2: Entering danger zone but not exiting
+        elif (
+            current_x < DANGER_ZONE_START
+            and DANGER_ZONE_START <= target_x <= DANGER_ZONE_END
+        ) or (
+            current_x > DANGER_ZONE_END
+            and DANGER_ZONE_START <= target_x <= DANGER_ZONE_END
+        ):
+
+            await asyncio.gather(
+                self.robot.execute_motion(RoboticArmMotion.FOLD),
+                self.robot.move_to(
+                    (
+                        DANGER_ZONE_START
+                        if current_x < DANGER_ZONE_START
+                        else DANGER_ZONE_END
+                    ),
+                    current_y,
+                ),
+            )
+
+            await self.robot.move_to(target_x, target_y)
+
+        # Scenario 3: Exiting danger zone
+        elif (
+            DANGER_ZONE_START <= current_x <= DANGER_ZONE_END
+            and target_x < DANGER_ZONE_START
+        ) or (
+            DANGER_ZONE_START <= current_x <= DANGER_ZONE_END
+            and target_x > DANGER_ZONE_END
+        ):
+
+            await self.robot.move_to(
+                DANGER_ZONE_START if target_x < DANGER_ZONE_START else DANGER_ZONE_END,
+                current_y,
+            )
+            await asyncio.gather(
+                self.robot.move_to(target_x, target_y),
+                self.robot.execute_motion(RoboticArmMotion.UNFOLD),
+            )
+
+        # Scenario 4: Moving within danger zone
+        elif (
+            DANGER_ZONE_START <= current_x <= DANGER_ZONE_END
+            and DANGER_ZONE_START <= target_x <= DANGER_ZONE_END
+        ):
+
+            await self.robot.move_to(target_x, target_y)
+
+        # Scenario 5: Safe movement (no danger zone interaction)
+        else:
+            await self.robot.move_to(target_x, target_y)
+
+    async def _move_to_start_of_danger_while_folding(
+        self, start_of_danger: tuple[int, int],
+    ):
+        await asyncio.gather(
+            self.robot.execute_motion(RoboticArmMotion.FOLD),
+            self.robot.move_to(start_of_danger),
+        )
 
     async def _move_to_destination_while_unfolding(self, destination: Slot):
-        await asyncio.gather(self.robot.move_to(destination.x, destination.y), self.robot.execute_motion(RoboticArmMotion.UNFOLD))
+        await asyncio.gather(
+            self.robot.move_to(destination.x, destination.y),
+            self.robot.execute_motion(RoboticArmMotion.UNFOLD),
+        )
 
     async def _get_item_from_safe_slot(self, slot: Slot, item: str) -> bool:
         await self.robot.move_to(slot.x, slot.y)
