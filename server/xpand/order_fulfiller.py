@@ -38,46 +38,15 @@ class OrderFulfiller:
     ) -> bool:
         possible_slots = items_to_possible_slots[item]
         for slot in possible_slots:
-            current_position = await self.robot.get_position()
-            start, end = self.get_dangerous_zone_start_end_x(
-                slot,
-                current_position,
-            )
-
-            if not start and not end:
-                picked = await self._get_item_from_safe_slot(slot, item)
-                if picked:
-                    return True
-                else:
-                    continue
-            elif start:
-                await self._move_to_start_of_danger_while_folding(
-                    start, current_position[1],
-                )
-                if end:
-                    await self.robot.move_to(end, current_position[1])
-                    await self._move_to_destination_while_unfolding(slot)
-
-    def get_dangerous_zone_start_end_x(
-        self, slot_to_reach: Slot, current_position: tuple[int, int],
-    ):
-        if (slot_to_reach.x >= START and slot_to_reach.x <= END) or (
-            current_position[0] >= START and slot_to_reach[0] <= END
-        ):
-            if (slot_to_reach.x >= START and slot_to_reach.x <= END) and (
-                current_position[0] >= START and slot_to_reach[0] <= END
-            ):
-                return (current_position[0], None)
-            elif slot_to_reach.x >= START and slot_to_reach.x <= END:
-                if current_position[0] < START:
-                    return (START, None)
-                elif current_position[0] > END:
-                    return (END, None)
-        elif slot_to_reach.x < START and current_position[0] > END:
-            return (END, START)
-        elif slot_to_reach.x > END and current_position[0] < START:
-            return (START, END)
-        return None, None
+            await self._move_safely(slot)
+            picked = await self.robot.execute_motion(RoboticArmMotion.PICK)
+            if not picked:
+                await self.inventory.flag_slot_error(slot.slot)
+                continue
+            else:
+                await self.inventory.item_picked(slot.slot, item)
+                return True
+        return False
 
     async def _move_safely(self, target_slot: Slot):
         current_x, current_y = await self.robot.get_position()
@@ -185,10 +154,3 @@ class OrderFulfiller:
 
     async def _get_item_from_safe_slot(self, slot: Slot, item: str) -> bool:
         await self.robot.move_to(slot.x, slot.y)
-        picked = await self.robot.execute_motion(RoboticArmMotion.PICK)
-        if not picked:
-            await self.inventory.flag_slot_error(slot.slot)
-            return False
-        else:
-            await self.inventory.item_picked(slot.slot, item)
-            return True
